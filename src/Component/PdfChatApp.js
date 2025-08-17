@@ -12,12 +12,7 @@ pdfjs.GlobalWorkerOptions.workerSrc =
   `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 // Change this if you prefer env config later
-const API_BASE =
-  (typeof import !== "undefined" &&
-    import.meta &&
-    import.meta.env &&
-    import.meta.env.VITE_BACKEND_URL) ||
-  "https://notebook-production-428c.up.railway.app";
+const API_BASE = "https://notebook-production-428c.up.railway.app";
 
 export default function PdfChatApp() {
   // viewer sizing
