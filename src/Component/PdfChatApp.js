@@ -20,7 +20,7 @@ export default function PdfChatApp() {
   const [viewerWidth, setViewerWidth] = useState(0);
 
   // upload & document
-  const [file, setFile] = useState(null);
+  const [, setFile] = useState(null);
   const [docId, setDocId] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
   const [numPages, setNumPages] = useState(null);
