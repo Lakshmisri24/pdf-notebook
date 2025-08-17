@@ -1,5 +1,5 @@
 import "./PdfChatApp.css";
-import React, { useMemo, useRef, useState } from "react";
+import React, { useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
 // pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -7,179 +7,194 @@ import { Document, Page, pdfjs } from "react-pdf";
 //   import.meta.url
 // ).toString();
 
-// Worker (Netlify-friendly CDN)
+// Worker for Netlify/production (CDN), falls back to local if needed
 pdfjs.GlobalWorkerOptions.workerSrc =
   `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 export default function PdfChatApp() {
+  // ---- config ----
   const API_BASE = "https://notebook-production-428c.up.railway.app";
+  const MAX_MB = 10;
 
-  // UI state
+  // ---- state ----
+  const [docId, setDocId] = useState(null);
+  const [pdfUrl, setPdfUrl] = useState("");     // full URL for viewer
+  const [numPages, setNumPages] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const [pendingStatus, setPendingStatus] = useState(""); // "Uploading…"/"Thinking…"
+  const [uploadError, setUploadError] = useState("");
+
   const [messages, setMessages] = useState([
     { role: "bot", text: "Upload a PDF and ask questions!" },
   ]);
   const [input, setInput] = useState("");
-  const [isUploading, setIsUploading] = useState(false);
-  const [numPages, setNumPages] = useState(null);
-  const [error, setError] = useState("");
 
-  // File metadata from backend (docId + render URL)
-  const [fileMeta, setFileMeta] = useState({
-    docId: null,
-    pdfUrl: null,
-    name: null,
-  });
+  const inputRef = useRef(null);
 
-  const fileInputRef = useRef(null);
-
-  // Build absolute PDF URL when backend returns "/file/xyz.pdf"
-  const pdfUrl = useMemo(() => {
-    if (!fileMeta.pdfUrl) return null;
-    return fileMeta.pdfUrl.startsWith("http")
-      ? fileMeta.pdfUrl
-      : `${API_BASE}${fileMeta.pdfUrl}`;
-  }, [fileMeta.pdfUrl]);
-
-  const handleFileChange = async (event) => {
-    const selected = event.target.files?.[0];
-    if (!selected) return;
-
-    setError("");
-    // client-side checks (mirror your backend)
-    if (selected.type !== "application/pdf") {
-      setError("Only PDF files are allowed (.pdf).");
-      // allow re-uploading same file name by clearing input value
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
-    if (selected.size > 10 * 1024 * 1024) {
-      setError("Max file size is 10 MB.");
-      if (fileInputRef.current) fileInputRef.current.value = "";
-      return;
-    }
-
-    const formData = new FormData();
-    formData.append("pdf", selected);
-
-    setIsUploading(true);
-    try {
-      const res = await fetch(`${API_BASE}/upload`, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!res.ok) {
-        const maybeJson = await res.json().catch(() => ({}));
-        setError(maybeJson.error || "Failed to upload PDF.");
-        return;
-      }
-
-      const data = await res.json();
-      // Expecting: { docId: "...", pdfUrl: "/file/...", sizeBytes: ... }
-      setFileMeta({
-        docId: data.docId || selected.name,
-        pdfUrl: data.pdfUrl || null,
-        name: selected.name,
-      });
-      setNumPages(null);
-      setMessages([
-        {
-          role: "bot",
-          text: `Uploaded "${selected.name}". Ask your questions below.`,
-        },
-      ]);
-    } catch (e) {
-      console.error("Upload error:", e);
-      setError("Error uploading PDF.");
-    } finally {
-      setIsUploading(false);
-      // Clear input so picking the **same filename** triggers onChange next time
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
+  // ---- helpers ----
+  const toMB = (bytes) => Math.round((bytes / (1024 * 1024)) * 10) / 10;
+  const resetFileInput = () => {
+    if (inputRef.current) inputRef.current.value = "";
   };
 
-  const onDocumentLoadSuccess = ({ numPages }) => setNumPages(numPages);
-
+  // Scroll to a specific page (used by citations)
   const goToPage = (pageNum) => {
     const el = document.getElementById(`pdf_page_${pageNum}`);
     if (!el) return;
     el.scrollIntoView({ behavior: "smooth", block: "start" });
+    // quick highlight flash
     el.style.boxShadow = "0 0 0 4px #2563eb";
-    setTimeout(() => (el.style.boxShadow = ""), 900);
+    setTimeout(() => (el.style.boxShadow = ""), 1000);
   };
 
-  const handleSend = async () => {
-    if (!input.trim() || !fileMeta.docId) return;
+  // ---- upload ----
+  const onFileChange = async (event) => {
+    const selectedFile = event.target.files?.[0];
+    if (!selectedFile) return;
 
-    const userMsg = { role: "user", text: input };
-    const next = [...messages, userMsg];
-    setMessages(next);
-    setInput("");
+    // basic validations
+    setUploadError("");
+    if (!selectedFile.name.toLowerCase().endsWith(".pdf")) {
+      setUploadError("Only PDF files are allowed (.pdf).");
+      resetFileInput();
+      return;
+    }
+    if (selectedFile.size > MAX_MB * 1024 * 1024) {
+      setUploadError(`File too large (${toMB(selectedFile.size)} MB). Max ${MAX_MB} MB.`);
+      resetFileInput();
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("pdf", selectedFile);
+
+    setIsUploading(true);
+    setPendingStatus("Uploading…");
 
     try {
-      const res = await fetch(`${API_BASE}/chat`, {
+      const response = await fetch(`${API_BASE}/upload`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: userMsg.text, docId: fileMeta.docId }),
+        body: formData,
       });
 
-      const data = await res.json().catch(() => ({}));
+      if (!response.ok) {
+        // Try to show server error (e.g., validation from backend)
+        let msg = "Failed to upload PDF.";
+        try {
+          const err = await response.json();
+          if (err?.error) msg = err.error;
+        } catch (_) {}
+        setUploadError(msg);
+        setMessages((m) => [...m, { role: "bot", text: "Failed to upload PDF." }]);
+        return;
+      }
+
+      const data = await response.json();
+      // expected: { docId, pdfUrl }
+      const nextDocId = data?.docId ?? selectedFile.name;
+      // pdfUrl may be relative => prefix with API_BASE
+      const nextPdfUrl = data?.pdfUrl
+        ? data.pdfUrl.startsWith("http")
+          ? data.pdfUrl
+          : `${API_BASE}${data.pdfUrl}`
+        : `${API_BASE}/file/${encodeURIComponent(selectedFile.name)}`;
+
+      setDocId(nextDocId);
+      setPdfUrl(nextPdfUrl);
+      setNumPages(null);
+      setMessages([{ role: "bot", text: `Uploaded "${selectedFile.name}". Ask your questions below.` }]);
+      resetFileInput();
+    } catch (error) {
+      console.error("Upload error:", error);
+      setUploadError("Error uploading PDF. Please try again.");
+      setMessages((m) => [...m, { role: "bot", text: "Error uploading PDF." }]);
+    } finally {
+      setIsUploading(false);
+      setPendingStatus("");
+    }
+  };
+
+  const onDocumentLoadSuccess = ({ numPages }) => {
+    setNumPages(numPages);
+  };
+
+  // ---- chat ----
+  const handleSend = async () => {
+    if (!input.trim() || !docId) return;
+
+    const newMessages = [...messages, { role: "user", text: input }];
+    setMessages(newMessages);
+    setInput("");
+    setPendingStatus("Thinking…");
+
+    try {
+      const response = await fetch(`${API_BASE}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: input, docId }),
+      });
+
+      const data = await response.json();
       setMessages([
-        ...next,
+        ...newMessages,
         {
           role: "bot",
-          text: data.answer || "No response.",
-          citations: Array.isArray(data.citations) ? data.citations : [],
+          text: data?.answer || "No response.",
+          citations: Array.isArray(data?.citations) ? data.citations : [],
         },
       ]);
-    } catch (e) {
-      console.error("Chat error:", e);
-      setMessages([...next, { role: "bot", text: "Error getting response." }]);
+    } catch (error) {
+      console.error("Chat error:", error);
+      setMessages([...newMessages, { role: "bot", text: "Error getting response." }]);
+    } finally {
+      setPendingStatus("");
     }
   };
 
   return (
     <div className="pdf-chat-app">
       <div className="pdf-chat-header">
-        <p>Lakshmi Sri HL - PDF Chat Assistant</p>
+        <p>Lakshmi Sri HL — PDF Chat Assistant</p>
       </div>
 
       <div className="pdf-chat-main">
-        {/* Chat / Controls */}
+        {/* LEFT: Chat */}
         <div className="chat-section">
+          {/* Upload box */}
           <div className="pdf-upload-container">
             <label className="pdf-upload-btn">
               Upload PDF
               <input
-                ref={fileInputRef}
+                ref={inputRef}
                 type="file"
                 accept="application/pdf"
+                onChange={onFileChange}
                 style={{ display: "none" }}
-                onChange={handleFileChange}
               />
             </label>
 
-            {/* caption BELOW the button */}
-            <div className="pdf-upload-caption">
-              Only PDFs allowed. Max size <strong>10 MB</strong>.
+            <div className="upload-hint">
+              <div className="hint-line">Only PDFs allowed.</div>
+              <div className="hint-line">
+                Max size <strong>{MAX_MB} MB</strong>.
+              </div>
             </div>
-
-            {/* show errors inline */}
-            {error && <div className="error-banner">{error}</div>}
           </div>
 
+          {/* any upload validation/server error */}
+          {uploadError && <div className="upload-error">{uploadError}</div>}
+
+          {/* Chat log */}
           <div className="chat-messages">
-            {messages.map((m, i) => (
-              <div key={i} className={`chat-message ${m.role}`}>
-                {/* bot text keeps newlines */}
-                <div className={m.role === "bot" ? "bot-text" : undefined}>
-                  {m.text}
+            {messages.map((msg, idx) => (
+              <div key={idx} className={`chat-message ${msg.role}`}>
+                <div className="msg-text" style={{ whiteSpace: "pre-line" }}>
+                  {msg.text}
                 </div>
 
-                {/* citations (pages) */}
-                {Array.isArray(m.citations) && m.citations.length > 0 && (
+                {Array.isArray(msg.citations) && msg.citations.length > 0 && (
                   <div className="citations">
-                    {m.citations.map((p) => (
+                    {msg.citations.map((p) => (
                       <button
                         key={p}
                         className="citation-link"
@@ -194,28 +209,35 @@ export default function PdfChatApp() {
                 )}
               </div>
             ))}
+
+            {/* Pending status bubble (Uploading… / Thinking…) */}
+            {pendingStatus && (
+              <div className="pending-status">
+                <span className="dot dot1" />
+                <span className="dot dot2" />
+                <span className="dot dot3" />
+                <span style={{ marginLeft: 8 }}>{pendingStatus}</span>
+              </div>
+            )}
           </div>
 
+          {/* Input */}
           <div className="chat-input">
             <input
               type="text"
-              placeholder={
-                fileMeta.docId
-                  ? "Ask something about the PDF..."
-                  : "Upload a PDF to start chatting..."
-              }
+              placeholder="Ask something about the PDF…"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
-              disabled={!fileMeta.docId}
+              disabled={!docId}
             />
-            <button onClick={handleSend} disabled={!fileMeta.docId || !input.trim()}>
+            <button onClick={handleSend} disabled={!docId || !input.trim()}>
               Send
             </button>
           </div>
         </div>
 
-        {/* PDF Viewer */}
+        {/* RIGHT: PDF Viewer */}
         <div className="pdf-viewer">
           <div className="view">
             <h2>PDF Viewer</h2>
@@ -224,32 +246,30 @@ export default function PdfChatApp() {
           {isUploading && (
             <div className="pdf-loader">
               <div className="spinner" />
-              <p>Uploading PDF, please wait...</p>
+              <p>Uploading PDF, please wait…</p>
             </div>
           )}
 
           {!isUploading && pdfUrl && (
-            <Document
-              key={fileMeta.docId} // keeps viewer stable per doc
-              file={pdfUrl}
-              onLoadSuccess={onDocumentLoadSuccess}
-            >
-              {Array.from({ length: numPages || 0 }, (_, i) => (
-                <div
-                  key={`wrap_${i + 1}`}
-                  id={`pdf_page_${i + 1}`}
-                  style={{ marginBottom: 24, scrollMarginTop: 80 }}
-                >
-                  {/* Optional page number label on each page */}
-                  <div className="page-badge">Page {i + 1}</div>
-                  <Page
-                    pageNumber={i + 1}
-                    renderTextLayer={false}
-                    renderAnnotationLayer={false}
-                    renderMode="canvas"
-                  />
-                </div>
-              ))}
+            <Document file={pdfUrl} onLoadSuccess={onDocumentLoadSuccess}>
+              {Array.from({ length: numPages || 0 }, (_, index) => {
+                const page = index + 1;
+                return (
+                  <div
+                    key={`pagewrap_${page}`}
+                    id={`pdf_page_${page}`}
+                    className="page-wrap"
+                  >
+                    <Page
+                      pageNumber={page}
+                      renderTextLayer={false}
+                      renderAnnotationLayer={false}
+                      renderMode="canvas"
+                    />
+                    <div className="page-badge">{page}</div>
+                  </div>
+                );
+              })}
             </Document>
           )}
         </div>
