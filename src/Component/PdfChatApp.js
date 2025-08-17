@@ -1,5 +1,11 @@
 import "./PdfChatApp.css";
-import React, { useRef, useState } from "react";
+import React, {
+  useRef,
+  useState,
+  useMemo,
+  useCallback,
+  useEffect,
+} from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
 // pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -7,16 +13,45 @@ import { Document, Page, pdfjs } from "react-pdf";
 //   import.meta.url
 // ).toString();
 
-
-// Netlify-friendly worker (pdfjs v5 uses .mjs worker)
+// Netlify-friendly worker (pdfjs v5 uses .mjs)
 pdfjs.GlobalWorkerOptions.workerSrc =
   `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
+// Memoized PDF viewer so typing in chat doesn't re-render the PDF
+const PdfViewer = React.memo(function PdfViewer({ url, onNumPages, numPages }) {
+  const pdfOptions = useMemo(() => ({ disableRange: true }), []);
+  const handleLoad = useCallback(({ numPages: n }) => onNumPages(n), [onNumPages]);
+
+  if (!url) return null;
+
+  return (
+    <Document file={url} options={pdfOptions} onLoadSuccess={handleLoad}>
+      {Array.from({ length: numPages || 0 }, (_, index) => {
+        const pageNum = index + 1;
+        return (
+          <div key={`page_${pageNum}`} id={`pdf_page_${pageNum}`} className="pdf-page-wrap">
+            <Page
+              pageNumber={pageNum}
+              renderTextLayer={false}
+              renderAnnotationLayer={false}
+              renderMode="canvas"
+            />
+            <div className="pdf-page-caption">
+              Page {pageNum}{numPages ? ` of ${numPages}` : ""}
+            </div>
+          </div>
+        );
+      })}
+    </Document>
+  );
+});
+
 export default function PdfChatApp() {
   const fileInputRef = useRef(null);
+  const chatContainerRef = useRef(null);
 
-  // Store server truth, not just name
-  const [doc, setDoc] = useState(null); // { docId, pdfUrl, displayName }
+  // { docId, pdfUrl, displayName }
+  const [doc, setDoc] = useState(null);
   const [numPages, setNumPages] = useState(null);
 
   const [messages, setMessages] = useState([
@@ -27,10 +62,40 @@ export default function PdfChatApp() {
   const [isUploading, setIsUploading] = useState(false);
   const [isChatLoading, setIsChatLoading] = useState(false);
 
-  // Keep as constant per your request (no env var move)
+  // Keep constant per your request
   const API_BASE = "https://notebook-production-428c.up.railway.app";
+  const MAX_MB = 10;
+  const MAX_BYTES = MAX_MB * 1024 * 1024;
 
-  // Smooth scroll + highlight when clicking a citation
+  // ----- Restore last doc from localStorage on mount -----
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("lastDoc");
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved?.docId && saved?.pdfUrl) {
+          setDoc(saved);
+          setMessages([
+            { role: "bot", text: `Reopened "${saved.displayName || saved.docId}". You can ask questions now.` },
+          ]);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  // ----- Auto-scroll chat to bottom whenever messages change -----
+  useEffect(() => {
+    const el = chatContainerRef.current;
+    if (!el) return;
+    // Use setTimeout to allow DOM to paint new message first
+    const id = setTimeout(() => {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }, 0);
+    return () => clearTimeout(id);
+  }, [messages]);
+
   const goToPage = (pageNum) => {
     const el = document.getElementById(`pdf_page_${pageNum}`);
     if (el) {
@@ -41,7 +106,6 @@ export default function PdfChatApp() {
   };
 
   const onFileClick = () => {
-    // ensure onChange fires even for same file
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -49,10 +113,18 @@ export default function PdfChatApp() {
     const selected = event.target.files?.[0];
     if (!selected) return;
 
-    // quick client guard
+    // Client-side validations
     const name = selected.name || "";
-    if (!name.toLowerCase().endsWith(".pdf")) {
+    const type = selected.type || "";
+    const size = selected.size || 0;
+
+    if (!name.toLowerCase().endsWith(".pdf") || !(type === "application/pdf" || type === "")) {
       setMessages([{ role: "bot", text: "Only PDF files are allowed (.pdf)." }]);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+    if (size > MAX_BYTES) {
+      setMessages([{ role: "bot", text: `File too large. Max size is ${MAX_MB} MB.` }]);
       if (fileInputRef.current) fileInputRef.current.value = "";
       return;
     }
@@ -76,12 +148,19 @@ export default function PdfChatApp() {
         return;
       }
 
+      // Expect { docId, pdfUrl }
       const { docId, pdfUrl } = await res.json();
-      setDoc({ docId, pdfUrl: `${API_BASE}${pdfUrl}`, displayName: selected.name });
+      const nextDoc = { docId, pdfUrl: `${API_BASE}${pdfUrl}`, displayName: selected.name };
+      setDoc(nextDoc);
       setNumPages(null);
-      setMessages([
-        { role: "bot", text: `Uploaded "${selected.name}". Ask your questions below.` },
-      ]);
+      setMessages([{ role: "bot", text: `Uploaded "${selected.name}". Ask your questions below.` }]);
+
+      // Persist to localStorage
+      try {
+        localStorage.setItem("lastDoc", JSON.stringify(nextDoc));
+      } catch {
+        // ignore
+      }
     } catch (e) {
       console.error("Upload error:", e);
       setDoc(null);
@@ -93,7 +172,7 @@ export default function PdfChatApp() {
     }
   };
 
-  const onDocumentLoadSuccess = ({ numPages }) => setNumPages(numPages);
+  const handleNumPages = useCallback((n) => setNumPages(n), []);
 
   const handleSend = async () => {
     if (!input.trim() || !doc?.docId) return;
@@ -158,9 +237,12 @@ export default function PdfChatApp() {
                 style={{ display: "none" }}
               />
             </label>
+            <div className="pdf-upload-note">
+              Only PDFs allowed. Max size <strong>10 MB</strong>.
+            </div>
           </div>
 
-          <div className="chat-messages">
+          <div className="chat-messages" ref={chatContainerRef}>
             {messages.map((msg, idx) => (
               <div key={idx} className={`chat-message ${msg.role}`}>
                 {/* Only bot answers show \n as new lines */}
@@ -169,10 +251,7 @@ export default function PdfChatApp() {
                 </div>
 
                 {Array.isArray(msg.citations) && msg.citations.length > 0 && (
-                  <div
-                    className="citations"
-                    style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}
-                  >
+                  <div className="citations">
                     {msg.citations.map((p) => (
                       <button
                         key={p}
@@ -225,57 +304,7 @@ export default function PdfChatApp() {
           )}
 
           {!isUploading && doc?.pdfUrl && (
-            <Document
-              file={doc.pdfUrl}
-              onLoadSuccess={onDocumentLoadSuccess}
-              options={{ disableRange: true }} // keep if server doesn't support 206
-            >
-              {Array.from({ length: numPages || 0 }, (_, index) => {
-                const pageNum = index + 1;
-                return (
-                  <div
-                    key={`page_${pageNum}`}
-                    id={`pdf_page_${pageNum}`}
-                    style={{
-                      marginBottom: 24,
-                      scrollMarginTop: 80,
-                      position: "relative",
-                      borderRadius: 8,
-                      overflow: "hidden",
-                    }}
-                  >
-                    {/* Page Number Badge */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 8,
-                        left: 8,
-                        zIndex: 2,
-                        background: "rgba(0,0,0,0.6)",
-                        color: "white",
-                        padding: "2px 8px",
-                        borderRadius: 12,
-                        fontSize: 12,
-                      }}
-                    >
-                      Page {pageNum}{numPages ? ` / ${numPages}` : ""}
-                    </div>
-
-                    <Page
-                      pageNumber={pageNum}
-                      renderTextLayer={false}
-                      renderAnnotationLayer={false}
-                      renderMode="canvas"
-                    />
-
-                    {/* Optional: label below the page too */}
-                    <div style={{ textAlign: "center", color: "#666", marginTop: 6, fontSize: 12 }}>
-                      Page {pageNum}{numPages ? ` of ${numPages}` : ""}
-                    </div>
-                  </div>
-                );
-              })}
-            </Document>
+            <PdfViewer url={doc.pdfUrl} onNumPages={handleNumPages} numPages={numPages} />
           )}
         </div>
       </div>
