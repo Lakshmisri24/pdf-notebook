@@ -333,3 +333,59 @@ background-color: white;
     font-size: 12px;
   }
 }
+
+
+/* Small helper note under the upload button */
+.pdf-upload-note {
+  font-size: 12px;
+  color: #666;
+  margin-top: 6px;
+}
+
+/* Styled container for each rendered PDF page */
+.pdf-page-wrap {
+  margin-bottom: 24px;
+  scroll-margin-top: 80px;
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+/* Caption under each page */
+.pdf-page-caption {
+  text-align: center;
+  color: #666;
+  margin-top: 6px;
+  font-size: 12px;
+}
+
+/* Citations row under bot messages */
+.citations {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Clickable Page N chips */
+.citation-link {
+  background: #eef3ff;
+  color: #1f3e8a;
+  border: 1px solid #c9d6ff;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+}
+
+.citation-link:hover {
+  background: #dbe7ff;
+  border-color: #b8caff;
+}
+
+.citation-link:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
