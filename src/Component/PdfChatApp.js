@@ -2,24 +2,23 @@ import "./PdfChatApp.css";
 import React, { useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
+// for local running
 // pdfjs.GlobalWorkerOptions.workerSrc = new URL(
 //   "pdfjs-dist/build/pdf.worker.min.mjs",
 //   import.meta.url
 // ).toString();
 
-// Worker (Netlify/CDN friendly)
+// for netlify fix
 pdfjs.GlobalWorkerOptions.workerSrc =
   `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-// Change this if you prefer env config later
 const API_BASE = "https://notebook-production-428c.up.railway.app";
 
 export default function PdfChatApp() {
-  // viewer sizing
+  
   const viewerRef = useRef(null);
   const [viewerWidth, setViewerWidth] = useState(0);
 
-  // upload & document
   const [, setFile] = useState(null);
   const [docId, setDocId] = useState(null);
   const [pdfUrl, setPdfUrl] = useState(null);
@@ -27,14 +26,12 @@ export default function PdfChatApp() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
 
-  // chat
   const [messages, setMessages] = useState([
     { role: "bot", text: "Upload a PDF and ask questions!" },
   ]);
   const [input, setInput] = useState("");
   const [isPending, setIsPending] = useState(false);
 
-  // measure viewer width for responsive Page width
   useEffect(() => {
     const measure = () => {
       if (viewerRef.current) {
@@ -64,9 +61,9 @@ export default function PdfChatApp() {
     setUploadError("");
     setIsUploading(true);
     setNumPages(null);
-    setFile(null); // force re-render cleanly
+    setFile(null); 
 
-    // Prepare form
+
     const formData = new FormData();
     formData.append("pdf", selectedFile);
 
@@ -77,13 +74,13 @@ export default function PdfChatApp() {
       });
 
       if (!resp.ok) {
-        // back-end may return a JSON {error:"..."}
+        
         let errText = "Failed to upload PDF.";
         try {
           const data = await resp.json();
           if (data?.error) errText = data.error;
         } catch {
-          /* ignore parse error */
+          
         }
         setUploadError(errText);
         return;
@@ -105,7 +102,6 @@ export default function PdfChatApp() {
       setUploadError("Error uploading PDF.");
     } finally {
       setIsUploading(false);
-      // allow selecting the same file again later
       event.target.value = "";
     }
   };
@@ -145,7 +141,6 @@ export default function PdfChatApp() {
     }
   };
 
-  // Render helper: paragraphs from answer (respect \n)
   const renderBotText = (text) =>
     String(text)
       .split(/\n+/)
@@ -155,7 +150,6 @@ export default function PdfChatApp() {
         </p>
       ));
 
-  // Width for PDF pages (kept within sensible bounds)
   const pageWidth = Math.max(280, Math.min(900, (viewerWidth || 0) - 32));
 
   return (
@@ -165,7 +159,6 @@ export default function PdfChatApp() {
       </div>
 
       <div className="pdf-chat-main">
-        {/* Chat column */}
         <div className="chat-section">
           <div className="pdf-upload-container">
             <label className="pdf-upload-btn">
@@ -236,7 +229,6 @@ export default function PdfChatApp() {
           </div>
         </div>
 
-        {/* Viewer column */}
         <div className="pdf-viewer" ref={viewerRef}>
           <h2>PDF Viewer</h2>
 
