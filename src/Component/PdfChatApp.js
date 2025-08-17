@@ -9,7 +9,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 
 //for netlify
 pdfjs.GlobalWorkerOptions.workerSrc =
-  `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.js`;
+  `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 export default function PdfChatApp() {
   const [file, setFile] = useState(null);
