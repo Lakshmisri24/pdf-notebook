@@ -1,5 +1,5 @@
 import "./PdfChatApp.css";
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 
 // pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -7,134 +7,133 @@ import { Document, Page, pdfjs } from "react-pdf";
 //   import.meta.url
 // ).toString();
 
-// Worker for Netlify/production (CDN), falls back to local if needed
+// Worker (Netlify/CDN friendly)
 pdfjs.GlobalWorkerOptions.workerSrc =
   `https://unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-export default function PdfChatApp() {
-  // ---- config ----
-  const API_BASE = "https://notebook-production-428c.up.railway.app";
-  const MAX_MB = 10;
+// Change this if you prefer env config later
+const API_BASE =
+  (typeof import !== "undefined" &&
+    import.meta &&
+    import.meta.env &&
+    import.meta.env.VITE_BACKEND_URL) ||
+  "https://notebook-production-428c.up.railway.app";
 
-  // ---- state ----
+export default function PdfChatApp() {
+  // viewer sizing
+  const viewerRef = useRef(null);
+  const [viewerWidth, setViewerWidth] = useState(0);
+
+  // upload & document
+  const [file, setFile] = useState(null);
   const [docId, setDocId] = useState(null);
-  const [pdfUrl, setPdfUrl] = useState("");     // full URL for viewer
+  const [pdfUrl, setPdfUrl] = useState(null);
   const [numPages, setNumPages] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
-  const [pendingStatus, setPendingStatus] = useState(""); // "Uploading…"/"Thinking…"
   const [uploadError, setUploadError] = useState("");
 
+  // chat
   const [messages, setMessages] = useState([
     { role: "bot", text: "Upload a PDF and ask questions!" },
   ]);
   const [input, setInput] = useState("");
+  const [isPending, setIsPending] = useState(false);
 
-  const inputRef = useRef(null);
+  // measure viewer width for responsive Page width
+  useEffect(() => {
+    const measure = () => {
+      if (viewerRef.current) {
+        setViewerWidth(viewerRef.current.clientWidth);
+      }
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    return () => window.removeEventListener("resize", measure);
+  }, []);
 
-  // ---- helpers ----
-  const toMB = (bytes) => Math.round((bytes / (1024 * 1024)) * 10) / 10;
-  const resetFileInput = () => {
-    if (inputRef.current) inputRef.current.value = "";
-  };
-
-  // Scroll to a specific page (used by citations)
+  // Scroll to & highlight a page
   const goToPage = (pageNum) => {
     const el = document.getElementById(`pdf_page_${pageNum}`);
-    if (!el) return;
-    el.scrollIntoView({ behavior: "smooth", block: "start" });
-    // quick highlight flash
-    el.style.boxShadow = "0 0 0 4px #2563eb";
-    setTimeout(() => (el.style.boxShadow = ""), 1000);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+      el.style.boxShadow = "0 0 0 4px #2563eb";
+      setTimeout(() => (el.style.boxShadow = ""), 900);
+    }
   };
 
-  // ---- upload ----
+  // Upload
   const onFileChange = async (event) => {
     const selectedFile = event.target.files?.[0];
     if (!selectedFile) return;
 
-    // basic validations
     setUploadError("");
-    if (!selectedFile.name.toLowerCase().endsWith(".pdf")) {
-      setUploadError("Only PDF files are allowed (.pdf).");
-      resetFileInput();
-      return;
-    }
-    if (selectedFile.size > MAX_MB * 1024 * 1024) {
-      setUploadError(`File too large (${toMB(selectedFile.size)} MB). Max ${MAX_MB} MB.`);
-      resetFileInput();
-      return;
-    }
+    setIsUploading(true);
+    setNumPages(null);
+    setFile(null); // force re-render cleanly
 
+    // Prepare form
     const formData = new FormData();
     formData.append("pdf", selectedFile);
 
-    setIsUploading(true);
-    setPendingStatus("Uploading…");
-
     try {
-      const response = await fetch(`${API_BASE}/upload`, {
+      const resp = await fetch(`${API_BASE}/upload`, {
         method: "POST",
         body: formData,
       });
 
-      if (!response.ok) {
-        // Try to show server error (e.g., validation from backend)
-        let msg = "Failed to upload PDF.";
+      if (!resp.ok) {
+        // back-end may return a JSON {error:"..."}
+        let errText = "Failed to upload PDF.";
         try {
-          const err = await response.json();
-          if (err?.error) msg = err.error;
-        } catch (_) {}
-        setUploadError(msg);
-        setMessages((m) => [...m, { role: "bot", text: "Failed to upload PDF." }]);
+          const data = await resp.json();
+          if (data?.error) errText = data.error;
+        } catch {
+          /* ignore parse error */
+        }
+        setUploadError(errText);
         return;
       }
 
-      const data = await response.json();
-      // expected: { docId, pdfUrl }
-      const nextDocId = data?.docId ?? selectedFile.name;
-      // pdfUrl may be relative => prefix with API_BASE
-      const nextPdfUrl = data?.pdfUrl
-        ? data.pdfUrl.startsWith("http")
-          ? data.pdfUrl
-          : `${API_BASE}${data.pdfUrl}`
-        : `${API_BASE}/file/${encodeURIComponent(selectedFile.name)}`;
-
-      setDocId(nextDocId);
-      setPdfUrl(nextPdfUrl);
-      setNumPages(null);
-      setMessages([{ role: "bot", text: `Uploaded "${selectedFile.name}". Ask your questions below.` }]);
-      resetFileInput();
-    } catch (error) {
-      console.error("Upload error:", error);
-      setUploadError("Error uploading PDF. Please try again.");
-      setMessages((m) => [...m, { role: "bot", text: "Error uploading PDF." }]);
+      const data = await resp.json();
+      // Expecting: { docId, pdfUrl }
+      setFile(selectedFile);
+      setDocId(data?.docId || selectedFile.name);
+      setPdfUrl(`${API_BASE}${data?.pdfUrl || `/file/${encodeURIComponent(selectedFile.name)}`}`);
+      setMessages([
+        {
+          role: "bot",
+          text: `Uploaded "${selectedFile.name}". Ask your questions below.`,
+        },
+      ]);
+    } catch (e) {
+      console.error("Upload error:", e);
+      setUploadError("Error uploading PDF.");
     } finally {
       setIsUploading(false);
-      setPendingStatus("");
+      // allow selecting the same file again later
+      event.target.value = "";
     }
   };
 
-  const onDocumentLoadSuccess = ({ numPages }) => {
-    setNumPages(numPages);
-  };
+  const onDocumentLoadSuccess = ({ numPages }) => setNumPages(numPages);
 
-  // ---- chat ----
+  // Chat send
   const handleSend = async () => {
     if (!input.trim() || !docId) return;
 
     const newMessages = [...messages, { role: "user", text: input }];
     setMessages(newMessages);
     setInput("");
-    setPendingStatus("Thinking…");
+    setIsPending(true);
 
     try {
-      const response = await fetch(`${API_BASE}/chat`, {
+      const resp = await fetch(`${API_BASE}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question: input, docId }),
       });
+      const data = await resp.json();
 
-      const data = await response.json();
       setMessages([
         ...newMessages,
         {
@@ -143,29 +142,40 @@ export default function PdfChatApp() {
           citations: Array.isArray(data?.citations) ? data.citations : [],
         },
       ]);
-    } catch (error) {
-      console.error("Chat error:", error);
+    } catch (e) {
+      console.error("Chat error:", e);
       setMessages([...newMessages, { role: "bot", text: "Error getting response." }]);
     } finally {
-      setPendingStatus("");
+      setIsPending(false);
     }
   };
+
+  // Render helper: paragraphs from answer (respect \n)
+  const renderBotText = (text) =>
+    String(text)
+      .split(/\n+/)
+      .map((line, i) => (
+        <p key={i} style={{ margin: "0 0 6px 0", whiteSpace: "pre-wrap" }}>
+          {line}
+        </p>
+      ));
+
+  // Width for PDF pages (kept within sensible bounds)
+  const pageWidth = Math.max(280, Math.min(900, (viewerWidth || 0) - 32));
 
   return (
     <div className="pdf-chat-app">
       <div className="pdf-chat-header">
-        <p>Lakshmi Sri HL — PDF Chat Assistant</p>
+        <p>Lakshmi Sri HL – PDF Chat Assistant</p>
       </div>
 
       <div className="pdf-chat-main">
-        {/* LEFT: Chat */}
+        {/* Chat column */}
         <div className="chat-section">
-          {/* Upload box */}
           <div className="pdf-upload-container">
             <label className="pdf-upload-btn">
               Upload PDF
               <input
-                ref={inputRef}
                 type="file"
                 accept="application/pdf"
                 onChange={onFileChange}
@@ -173,24 +183,20 @@ export default function PdfChatApp() {
               />
             </label>
 
-            <div className="upload-hint">
-              <div className="hint-line">Only PDFs allowed.</div>
-              <div className="hint-line">
-                Max size <strong>{MAX_MB} MB</strong>.
-              </div>
+            <div className="upload-hint" aria-live="polite">
+              <span className="hint-line">Only PDFs allowed.</span>
+              <span className="hint-line">
+                Max size <strong>10 MB</strong>.
+              </span>
             </div>
           </div>
 
-          {/* any upload validation/server error */}
           {uploadError && <div className="upload-error">{uploadError}</div>}
 
-          {/* Chat log */}
           <div className="chat-messages">
             {messages.map((msg, idx) => (
               <div key={idx} className={`chat-message ${msg.role}`}>
-                <div className="msg-text" style={{ whiteSpace: "pre-line" }}>
-                  {msg.text}
-                </div>
+                {msg.role === "bot" ? renderBotText(msg.text) : msg.text}
 
                 {Array.isArray(msg.citations) && msg.citations.length > 0 && (
                   <div className="citations">
@@ -210,22 +216,20 @@ export default function PdfChatApp() {
               </div>
             ))}
 
-            {/* Pending status bubble (Uploading… / Thinking…) */}
-            {pendingStatus && (
-              <div className="pending-status">
-                <span className="dot dot1" />
+            {isPending && (
+              <div className="pending-status" aria-live="polite">
+                <span className="dot" />
                 <span className="dot dot2" />
                 <span className="dot dot3" />
-                <span style={{ marginLeft: 8 }}>{pendingStatus}</span>
+                <span>thinking…</span>
               </div>
             )}
           </div>
 
-          {/* Input */}
           <div className="chat-input">
             <input
               type="text"
-              placeholder="Ask something about the PDF…"
+              placeholder={docId ? "Ask something about the PDF…" : "Upload a PDF first"}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && handleSend()}
@@ -237,11 +241,9 @@ export default function PdfChatApp() {
           </div>
         </div>
 
-        {/* RIGHT: PDF Viewer */}
-        <div className="pdf-viewer">
-          <div className="view">
-            <h2>PDF Viewer</h2>
-          </div>
+        {/* Viewer column */}
+        <div className="pdf-viewer" ref={viewerRef}>
+          <h2>PDF Viewer</h2>
 
           {isUploading && (
             <div className="pdf-loader">
@@ -252,21 +254,18 @@ export default function PdfChatApp() {
 
           {!isUploading && pdfUrl && (
             <Document file={pdfUrl} onLoadSuccess={onDocumentLoadSuccess}>
-              {Array.from({ length: numPages || 0 }, (_, index) => {
-                const page = index + 1;
+              {Array.from({ length: numPages || 0 }, (_, i) => {
+                const pageNum = i + 1;
                 return (
-                  <div
-                    key={`pagewrap_${page}`}
-                    id={`pdf_page_${page}`}
-                    className="page-wrap"
-                  >
+                  <div key={`wrap_${pageNum}`} id={`pdf_page_${pageNum}`} className="page-wrap">
                     <Page
-                      pageNumber={page}
+                      pageNumber={pageNum}
+                      width={pageWidth}
                       renderTextLayer={false}
                       renderAnnotationLayer={false}
                       renderMode="canvas"
                     />
-                    <div className="page-badge">{page}</div>
+                    <div className="page-badge">{pageNum}</div>
                   </div>
                 );
               })}
