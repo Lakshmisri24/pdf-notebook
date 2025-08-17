@@ -1,4 +1,4 @@
-/* Layout */
+
 .pdf-chat-app {
   display: flex;
   flex-direction: column;
@@ -27,7 +27,7 @@
   overflow: hidden;
 }
 
-/* Viewer */
+
 .pdf-viewer {
   flex: 2;
   background: radial-gradient(circle at top left, #fdfdfd, #e6ecf3);
@@ -50,7 +50,7 @@
   letter-spacing: 0.5px;
 }
 
-/* Each PDF page wrapper (for badge + highlight) */
+
 .page-wrap {
   position: relative;
   margin: 0 auto 28px auto;
@@ -68,7 +68,7 @@
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
 }
 
-/* Ensure the PDF canvas scales within the wrapper */
+
 .react-pdf__Page__canvas {
   width: 100% !important;
   height: auto !important;
@@ -82,7 +82,7 @@
   overflow: hidden;
 }
 
-/* Page number pill */
+
 .page-badge {
   position: absolute;
   top: 10px;
@@ -95,7 +95,7 @@
   pointer-events: none;
 }
 
-/* Upload */
+
 .pdf-upload-container {
   display: flex;
   align-items: center;
@@ -144,7 +144,7 @@
   font-size: 13px;
 }
 
-/* Chat */
+
 .chat-section {
   flex: 1;
   display: flex;
@@ -211,7 +211,7 @@
 }
 .citation-link:hover { background: #e0e7ff; }
 
-/* Pending bubble */
+
 .pending-status {
   align-self: flex-start;
   display: inline-flex;
@@ -239,7 +239,6 @@
   40% { transform: scale(1); opacity: 1; }
 }
 
-/* Input */
 .chat-input {
   display: flex;
   padding: 8px;
@@ -265,7 +264,6 @@
 }
 .chat-input button:hover { background: #1e4bb8; }
 
-/* Loader under viewer */
 .pdf-loader {
   display: flex;
   flex-direction: column;
@@ -286,7 +284,6 @@
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* Responsive */
 @media (max-width: 768px) {
   .pdf-chat-app { height: auto; }
   .pdf-chat-header { font-size: 18px; padding: 8px; text-align: center; }
