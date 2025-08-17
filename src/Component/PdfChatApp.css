@@ -33,6 +33,7 @@
   background: radial-gradient(circle at top left, #fdfdfd, #e6ecf3);
   border-right: 1px solid #d3dce6;
   overflow-y: auto;
+  overflow-x: hidden;
   padding: 32px 24px;
   border-radius: 16px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
@@ -52,18 +53,33 @@
 /* Each PDF page wrapper (for badge + highlight) */
 .page-wrap {
   position: relative;
-  margin-bottom: 28px;
+  margin: 0 auto 28px auto;
   padding: 16px;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.08);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
   scroll-margin-top: 80px;
+  max-width: 100%;
 }
 
 .page-wrap:hover {
   transform: scale(1.015);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1);
+}
+
+/* Ensure the PDF canvas scales within the wrapper */
+.react-pdf__Page__canvas {
+  width: 100% !important;
+  height: auto !important;
+  max-width: 100% !important;
+  display: block;
+}
+
+.react-pdf__Page__textContent,
+.react-pdf__Page__annotations.annotationLayer {
+  max-width: 100%;
+  overflow: hidden;
 }
 
 /* Page number pill */
@@ -107,10 +123,7 @@
   transition: background 0.15s ease;
   user-select: none;
 }
-
-.pdf-upload-btn:hover {
-  background: #1d57d5;
-}
+.pdf-upload-btn:hover { background: #1d57d5; }
 
 .upload-hint {
   display: flex;
@@ -119,9 +132,7 @@
   color: #5b6470;
   line-height: 1.2;
 }
-.upload-hint .hint-line strong {
-  font-weight: 700;
-}
+.upload-hint .hint-line strong { font-weight: 700; }
 
 .upload-error {
   color: #b91c1c;
@@ -198,9 +209,7 @@
   padding: 6px 10px;
   cursor: pointer;
 }
-.citation-link:hover {
-  background: #e0e7ff;
-}
+.citation-link:hover { background: #e0e7ff; }
 
 /* Pending bubble */
 .pending-status {
@@ -215,7 +224,6 @@
   padding: 6px 10px;
   font-size: 12px;
 }
-
 .dot {
   width: 6px;
   height: 6px;
@@ -238,7 +246,6 @@
   background: #fff;
   border-top: 1px solid #ddd;
 }
-
 .chat-input input {
   flex: 1;
   padding: 10px;
@@ -246,7 +253,6 @@
   border-radius: 8px;
   outline: none;
 }
-
 .chat-input button {
   margin-left: 8px;
   padding: 10px 16px;
@@ -257,9 +263,7 @@
   cursor: pointer;
   font-size: 14px;
 }
-.chat-input button:hover {
-  background: #1e4bb8;
-}
+.chat-input button:hover { background: #1e4bb8; }
 
 /* Loader under viewer */
 .pdf-loader {
@@ -298,12 +302,21 @@
   .page-wrap { padding: 12px; }
 
   .pdf-upload-container {
-    width: 95%;
+    width: 100%;
     height: auto;
-    margin: 12px auto;
+    margin: 12px 0;
     padding: 12px;
+    gap: 10px;
+    flex-direction: column;
+    align-items: stretch;
   }
-  .pdf-upload-btn { font-size: 13px; }
+  .pdf-upload-btn {
+    width: 100%;
+    justify-content: center;
+    padding: 12px;
+    font-size: 14px;
+  }
+  .upload-hint { text-align: center; font-size: 12px; }
 
   .chat-section { flex: none; width: 100%; }
   .chat-messages { padding: 12px; gap: 12px; }
